@@ -9,7 +9,7 @@ use crate::egl::types::EGLint;
 use crate::free_unix::adapter::FreeUnixAdapter;
 use crate::mesa_surfaceless::context::{NativeContext, SurfacelessMesaContext};
 use crate::mesa_surfaceless::surface::{SurfacelessMesaSurface, SurfacelessMesaSurfaceTexture};
-use crate::{egl, Adapter, Context, EglContextDescriptor, Surface, SurfaceTexture};
+use crate::{egl, Adapter, Context, DmabufDescriptor, EglContextDescriptor, Surface, SurfaceTexture};
 use crate::{gl, ContextDescriptor};
 use crate::{ContextAttributes, Gl, SurfaceInfo};
 use crate::{Error, GLApi, SurfaceAccess, SurfaceType};
@@ -499,6 +499,26 @@ impl Device {
             .surfaceless_mesa()
             .expect("Incompatible surface type");
         surface.0.info()
+    }
+
+    /// Exports a surface's backing buffer as a set of Linux DMABuf file descriptors.
+    ///
+    /// The surface must be a texture-backed (`Generic`) surface; a widget surface
+    /// returns [`Error::WidgetAttached`]. This requires the
+    /// `EGL_MESA_image_dma_buf_export` EGL extension; if it is unavailable,
+    /// [`Error::UnsupportedOnThisPlatform`] is returned.
+    ///
+    /// The returned [`DmabufDescriptor`] owns the exported file descriptors, which
+    /// can be sent to another process to share the rendered buffer without a copy.
+    #[inline]
+    pub fn export_surface_to_dmabuf(
+        &self,
+        surface: &Surface,
+    ) -> Result<DmabufDescriptor, Error> {
+        let surface = surface.surfaceless_mesa()?;
+        surface
+            .0
+            .export_to_dmabuf(self.native_connection.egl_display)
     }
 
     /// Returns the OpenGL texture object containing the contents of this surface.

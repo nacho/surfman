@@ -9,5 +9,8 @@ pub mod surface;
 crate::implement_interfaces!();
 
 #[cfg(test)]
+mod dmabuf_tests;
+
+#[cfg(test)]
 #[path = "../tests.rs"]
 mod tests;

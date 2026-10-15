@@ -14,12 +14,14 @@ use crate::gl_utils;
 use crate::renderbuffers::Renderbuffers;
 use crate::Gl;
 use crate::{ContextAttributes, ContextID, Error, SurfaceID, SurfaceInfo};
+use crate::{DmabufDescriptor, DmabufPlane};
 
 use euclid::default::Size2D;
 use glow::{Framebuffer, HasContext, PixelUnpackData, Texture};
 use std::fmt::{self, Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::raw::c_void;
 use std::ptr;
 
@@ -289,6 +291,81 @@ impl EGLBackedSurface {
         }
     }
 
+    /// Export this surface's backing buffer as a set of Linux DMABuf file descriptors.
+    ///
+    /// This only works for texture-backed (`Generic`) surfaces, which hold an
+    /// `EGLImageKHR`; a window-attached surface returns [`Error::WidgetAttached`].
+    /// It requires the `EGL_MESA_image_dma_buf_export` extension; if the
+    /// extension's entry points are not available, [`Error::UnsupportedOnThisPlatform`]
+    /// is returned.
+    pub(crate) fn export_to_dmabuf(
+        &self,
+        egl_display: EGLDisplay,
+    ) -> Result<DmabufDescriptor, Error> {
+        let egl_image = match self.objects {
+            EGLSurfaceObjects::TextureImage { egl_image, .. } => egl_image,
+            EGLSurfaceObjects::Window { .. } => return Err(Error::WidgetAttached),
+        };
+
+        let (query, export) = match (
+            EGL_EXTENSION_FUNCTIONS.ExportDMABUFImageQueryMESA,
+            EGL_EXTENSION_FUNCTIONS.ExportDMABUFImageMESA,
+        ) {
+            (Some(query), Some(export)) => (query, export),
+            _ => return Err(Error::UnsupportedOnThisPlatform),
+        };
+
+        let mut fourcc: EGLint = 0;
+        let mut num_planes: EGLint = 0;
+        let mut modifier: u64 = 0;
+        let ok = query(
+            egl_display,
+            egl_image,
+            &mut fourcc,
+            &mut num_planes,
+            &mut modifier,
+        );
+        if ok == egl::FALSE || num_planes <= 0 {
+            return Err(Error::Failed);
+        }
+
+        let plane_count = num_planes as usize;
+        let mut fds = vec![0 as EGLint; plane_count];
+        let mut strides = vec![0 as EGLint; plane_count];
+        let mut offsets = vec![0 as EGLint; plane_count];
+        let ok = export(
+            egl_display,
+            egl_image,
+            fds.as_mut_ptr(),
+            strides.as_mut_ptr(),
+            offsets.as_mut_ptr(),
+        );
+        if ok == egl::FALSE {
+            return Err(Error::Failed);
+        }
+
+        // SAFETY: the fds were just handed to us by eglExportDMABUFImageMESA,
+        // which transfers ownership to the caller.
+        let owned_fds = fds
+            .iter()
+            .map(|&fd| unsafe { OwnedFd::from_raw_fd(fd) })
+            .collect::<Vec<_>>();
+        let planes = strides
+            .iter()
+            .zip(offsets.iter())
+            .map(|(&stride, &offset)| DmabufPlane { offset, stride })
+            .collect::<Vec<_>>();
+
+        Ok(DmabufDescriptor {
+            fds: owned_fds,
+            width: self.size.width,
+            height: self.size.height,
+            drm_fourcc: fourcc as u32,
+            drm_modifier: modifier,
+            planes,
+        })
+    }
+
     pub(crate) fn info(&self) -> SurfaceInfo {
         SurfaceInfo {
             size: self.size,
@@ -422,3 +499,33 @@ pub(crate) unsafe fn bind_egl_image_to_gl_texture(gl: &Gl, egl_image: EGLImageKH
     debug_assert_eq!(gl.get_error(), gl::NO_ERROR);
     texture
 }
+
+#[cfg(test)]
+mod test {
+    use super::{EGLBackedSurface, EGLSurfaceObjects};
+    use crate::egl;
+    use crate::{ContextID, Error};
+    use euclid::default::Size2D;
+    use std::ptr;
+
+    #[test]
+    fn export_to_dmabuf_rejects_window_surface() {
+        // A window-attached surface has no exportable EGLImage, so export must
+        // fail with WidgetAttached without touching any live EGL state.
+        let surface = EGLBackedSurface {
+            context_id: ContextID(0),
+            size: Size2D::new(16, 16),
+            objects: EGLSurfaceObjects::Window {
+                native_window: ptr::null(),
+                egl_surface: egl::NO_SURFACE,
+            },
+            destroyed: false,
+        };
+
+        match surface.export_to_dmabuf(egl::NO_DISPLAY) {
+            Err(Error::WidgetAttached) => {}
+            other => panic!("expected Err(WidgetAttached), got {other:?}"),
+        }
+    }
+}
+

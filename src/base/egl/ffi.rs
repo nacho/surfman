@@ -73,6 +73,24 @@ pub(crate) struct EGLExtensionFunctions {
             value: *mut *mut c_void,
         ) -> EGLBoolean,
     >,
+    pub(crate) ExportDMABUFImageQueryMESA: Option<
+        extern "C" fn(
+            dpy: EGLDisplay,
+            image: EGLImageKHR,
+            fourcc: *mut EGLint,
+            num_planes: *mut EGLint,
+            modifiers: *mut u64,
+        ) -> EGLBoolean,
+    >,
+    pub(crate) ExportDMABUFImageMESA: Option<
+        extern "C" fn(
+            dpy: EGLDisplay,
+            image: EGLImageKHR,
+            fds: *mut EGLint,
+            strides: *mut EGLint,
+            offsets: *mut EGLint,
+        ) -> EGLBoolean,
+    >,
 }
 
 pub(crate) static EGL_EXTENSION_FUNCTIONS: LazyLock<EGLExtensionFunctions> = LazyLock::new(|| {
@@ -89,6 +107,8 @@ pub(crate) static EGL_EXTENSION_FUNCTIONS: LazyLock<EGLExtensionFunctions> = Laz
             QueryDeviceAttribEXT: cast(get(c"eglQueryDeviceAttribEXT")),
             QueryDisplayAttribEXT: cast(get(c"eglQueryDisplayAttribEXT")),
             QuerySurfacePointerANGLE: cast(get(c"eglQuerySurfacePointerANGLE")),
+            ExportDMABUFImageQueryMESA: cast(get(c"eglExportDMABUFImageQueryMESA")),
+            ExportDMABUFImageMESA: cast(get(c"eglExportDMABUFImageMESA")),
         }
     }
 });

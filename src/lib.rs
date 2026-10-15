@@ -25,6 +25,7 @@ pub mod connection;
 mod context;
 mod context_descriptor;
 pub mod device;
+pub mod dmabuf;
 pub mod error;
 #[cfg(free_unix)]
 pub mod free_unix;
@@ -63,6 +64,7 @@ pub use wgl as default;
 
 pub use crate::context::{Context, ContextAttributeFlags, ContextAttributes, ContextID};
 pub use crate::context_descriptor::ContextDescriptor;
+pub use crate::dmabuf::{DmabufDescriptor, DmabufPlane};
 pub use crate::error::{Error, WindowingApiError};
 pub use crate::info::{GLApi, GLVersion};
 pub use crate::surface::{Surface, SurfaceAccess, SurfaceID, SurfaceInfo, SurfaceType};
